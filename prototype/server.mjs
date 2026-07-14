@@ -20,6 +20,8 @@ const host = process.env.HOST?.trim() || (process.env.RENDER ? "0.0.0.0" : "127.
 let openAIKey = process.env.OPENAI_API_KEY?.trim() || "";
 const dialogueModel = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
 const transcribeModel = process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe";
+const speechModel = process.env.OPENAI_SPEECH_MODEL?.trim() || "tts-1";
+const speechVoice = process.env.OPENAI_SPEECH_VOICE?.trim() || "nova";
 const openAITimeoutMs = readInteger(process.env.OPENAI_TIMEOUT_MS, 12000, 1000, 30000);
 const allowRuntimeApiKey = process.env.ALLOW_RUNTIME_API_KEY !== "false" && !process.env.RENDER;
 const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "https://bibliks.github.io")
@@ -79,6 +81,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/transcribe") {
       return await handleTranscription(request, response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/speech") {
+      return await handleSpeech(request, response);
     }
 
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -207,6 +213,52 @@ async function handleTranscription(request, response) {
   } catch (error) {
     console.warn("Transcription unavailable:", error instanceof Error ? error.message : "unknown error");
     return sendJson(response, 503, { error: "transcription_unavailable" });
+  }
+}
+
+async function handleSpeech(request, response) {
+  if (!openAIKey) {
+    return sendJson(response, 503, { error: "openai_not_configured" });
+  }
+
+  const body = await readJson(request, 16 * 1024);
+  const input = typeof body.text === "string" ? body.text.trim().slice(0, 1200) : "";
+  if (!input) return sendJson(response, 400, { error: "speech_text_required" });
+
+  try {
+    const apiResponse = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openAIKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: speechModel,
+        voice: speechVoice,
+        input,
+        response_format: "mp3",
+        speed: 0.96,
+      }),
+      signal: AbortSignal.timeout(Math.max(openAITimeoutMs, 20000)),
+    });
+
+    if (!apiResponse.ok) {
+      const data = await apiResponse.json().catch(() => ({}));
+      throw new Error(openAIErrorLabel("speech", apiResponse.status, data));
+    }
+
+    const audio = Buffer.from(await apiResponse.arrayBuffer());
+    if (!audio.length) throw new Error("speech_empty_audio");
+    response.writeHead(200, {
+      "Content-Type": apiResponse.headers.get("content-type") || "audio/mpeg",
+      "Content-Length": audio.length,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    response.end(audio);
+  } catch (error) {
+    console.warn("Speech unavailable:", error instanceof Error ? error.message : "unknown error");
+    return sendJson(response, 503, { error: "speech_unavailable" });
   }
 }
 
@@ -418,6 +470,7 @@ function consumeRateLimit(request, pathname) {
     "/api/configure": 5,
     "/api/dialogue": 40,
     "/api/transcribe": 20,
+    "/api/speech": 40,
   };
   const limit = limits[pathname] || 20;
   const clientAddress = String(

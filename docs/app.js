@@ -31,6 +31,10 @@
   const forceFallback = query.get("fallback") === "1";
   const disableCamera = query.get("camera") === "off";
   const forceRepeat = query.get("repeat") === "1";
+  const isAppleMobile =
+    /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const prefersRemoteSpeech = isAppleMobile || /Android|Mobile/.test(navigator.userAgent);
   const activityBucket = isWithApp && query.get("activity") === "dormant" ? "dormant" : "active";
   const profile = backendTimeout
     ? { has_account: false, activity_bucket: "unknown" }
@@ -113,8 +117,18 @@
   let listenResumeAt = 0;
   let speechGeneration = 0;
   let speechFallbackTimer = 0;
+  let currentUtterance = null;
+  let speechRequest = null;
+  let speechObjectUrl = "";
   let experienceStarted = false;
   let openAIConfigured = false;
+  let healthCheckPromise = null;
+  const outputAudio = new Audio();
+  outputAudio.preload = "auto";
+  outputAudio.playsInline = true;
+  outputAudio.setAttribute("playsinline", "");
+  const silentAudioSource =
+    "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA";
 
   window.__sberkotAnalytics = [];
   setupModeCopy();
@@ -127,7 +141,7 @@
     elements.apiSetup.open = false;
   });
   elements.apiSetup.hidden = usesRemoteBackend;
-  checkHealth();
+  healthCheckPromise = checkHealth();
 
   function apiUrl(pathname) {
     if (apiBase) return `${apiBase}/api/${pathname}`;
@@ -171,7 +185,15 @@
       elements.ctaNote.hidden = false;
     });
 
-    elements.micButton.addEventListener("click", toggleAlwaysListening);
+    elements.micButton.addEventListener("click", () => {
+      unlockMobileAudio();
+      toggleAlwaysListening();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) resumeAudioSession();
+    });
+    window.addEventListener("pageshow", resumeAudioSession);
+    window.addEventListener("focus", resumeAudioSession);
     window.addEventListener("pagehide", stopAllMedia);
   }
 
@@ -225,6 +247,7 @@
 
   async function startExperience() {
     if (elements.startButton.disabled) return;
+    unlockMobileAudio();
     experienceStarted = true;
     elements.startButton.disabled = true;
     elements.intro.hidden = true;
@@ -232,6 +255,10 @@
     elements.scanHint.hidden = false;
     setState("LOADING");
     track("session_start", { mode, fallback: usingFallback });
+    if (!openAIConfigured) {
+      healthCheckPromise = checkHealth();
+      await healthCheckPromise;
+    }
     if (openAIConfigured) await startAlwaysListening();
 
     if (usingFallback) {
@@ -572,41 +599,148 @@
   function speak(text, onDone = null) {
     const generation = ++speechGeneration;
     window.clearTimeout(speechFallbackTimer);
+    stopSpeechPlayback();
+    assistantSpeaking = true;
+    setCharacterSpeaking(true);
+    updateListeningUi();
+
+    if (openAIConfigured && prefersRemoteSpeech) {
+      speakWithRemoteAudio(text, generation, onDone).catch(() => {
+        if (generation !== speechGeneration || !assistantSpeaking) return;
+        speakWithBrowserVoice(text, generation, onDone);
+      });
+      speechFallbackTimer = window.setTimeout(
+        () => finishSpeech(generation, onDone),
+        Math.min(45000, Math.max(12000, text.length * 180)),
+      );
+      return;
+    }
+
+    speakWithBrowserVoice(text, generation, onDone);
+  }
+
+  async function speakWithRemoteAudio(text, generation, onDone) {
+    speechRequest = new AbortController();
+    const response = await fetch(apiUrl("speech"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: speechRequest.signal,
+    });
+    if (!response.ok) throw new Error("speech_unavailable");
+    const audioBlob = await response.blob();
+    if (!audioBlob.size || generation !== speechGeneration) return;
+
+    releaseSpeechObjectUrl();
+    speechObjectUrl = URL.createObjectURL(audioBlob);
+    outputAudio.src = speechObjectUrl;
+    outputAudio.currentTime = 0;
+    outputAudio.onended = () => finishSpeech(generation, onDone);
+    outputAudio.onerror = null;
+    await outputAudio.play();
+  }
+
+  function speakWithBrowserVoice(text, generation, onDone) {
     if (!("speechSynthesis" in window)) {
-      setCharacterSpeaking(false);
-      onDone?.();
+      finishSpeech(generation, onDone);
       return;
     }
 
     window.speechSynthesis.cancel();
+    window.speechSynthesis.resume();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "ru-RU";
     utterance.rate = 0.94;
     utterance.pitch = 1.08;
-    let finished = false;
-    const finish = () => {
-      if (finished || generation !== speechGeneration) return;
-      finished = true;
-      window.clearTimeout(speechFallbackTimer);
-      assistantSpeaking = false;
-      listenResumeAt = performance.now() + 450;
-      setCharacterSpeaking(false);
-      updateListeningUi();
-      onDone?.();
-    };
+    const russianVoice = window.speechSynthesis
+      .getVoices()
+      .find((voice) => voice.lang?.toLowerCase().startsWith("ru"));
+    if (russianVoice) utterance.voice = russianVoice;
+    currentUtterance = utterance;
     utterance.addEventListener("start", () => {
       if (generation !== speechGeneration) return;
       assistantSpeaking = true;
       setCharacterSpeaking(true);
       updateListeningUi();
     });
-    utterance.addEventListener("end", finish, { once: true });
-    utterance.addEventListener("error", finish, { once: true });
-    assistantSpeaking = true;
-    setCharacterSpeaking(true);
-    updateListeningUi();
+    utterance.addEventListener("end", () => finishSpeech(generation, onDone), { once: true });
+    utterance.addEventListener("error", () => finishSpeech(generation, onDone), { once: true });
     window.speechSynthesis.speak(utterance);
-    speechFallbackTimer = window.setTimeout(finish, Math.min(15000, Math.max(3500, text.length * 95)));
+    speechFallbackTimer = window.setTimeout(
+      () => finishSpeech(generation, onDone),
+      Math.min(30000, Math.max(5000, text.length * 120)),
+    );
+  }
+
+  function finishSpeech(generation, onDone) {
+    if (generation !== speechGeneration || !assistantSpeaking) return;
+    window.clearTimeout(speechFallbackTimer);
+    speechRequest?.abort();
+    speechRequest = null;
+    outputAudio.pause();
+    assistantSpeaking = false;
+    listenResumeAt = performance.now() + 600;
+    currentUtterance = null;
+    outputAudio.onended = null;
+    outputAudio.onerror = null;
+    releaseSpeechObjectUrl();
+    setCharacterSpeaking(false);
+    updateListeningUi();
+    onDone?.();
+  }
+
+  function stopSpeechPlayback() {
+    speechRequest?.abort();
+    speechRequest = null;
+    outputAudio.pause();
+    outputAudio.onended = null;
+    outputAudio.onerror = null;
+    window.speechSynthesis?.cancel();
+    currentUtterance = null;
+    releaseSpeechObjectUrl();
+  }
+
+  function releaseSpeechObjectUrl() {
+    if (!speechObjectUrl) return;
+    URL.revokeObjectURL(speechObjectUrl);
+    speechObjectUrl = "";
+  }
+
+  function ensureAudioContext() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    if (!audioContext || audioContext.state === "closed") audioContext = new AudioContextClass();
+    return audioContext;
+  }
+
+  function unlockMobileAudio() {
+    const context = ensureAudioContext();
+    if (context) {
+      context.resume().catch(() => {});
+      try {
+        const buffer = context.createBuffer(1, 1, context.sampleRate);
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(context.destination);
+        source.start(0);
+      } catch {
+        // Safari всё равно может разблокировать контекст через resume().
+      }
+    }
+
+    outputAudio.src = silentAudioSource;
+    outputAudio.play().then(() => {
+      outputAudio.pause();
+      outputAudio.currentTime = 0;
+    }).catch(() => {});
+    window.speechSynthesis?.resume();
+  }
+
+  function resumeAudioSession() {
+    if (audioContext && ["suspended", "interrupted"].includes(audioContext.state)) {
+      audioContext.resume().catch(() => {});
+    }
+    if (assistantSpeaking && !outputAudio.paused) outputAudio.play().catch(() => {});
   }
 
   async function toggleAlwaysListening() {
@@ -635,8 +769,7 @@
     voiceUnavailable = false;
     elements.micLabel.textContent = "Запрашиваем доступ к микрофону…";
     try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      audioContext = new AudioContextClass();
+      audioContext = ensureAudioContext();
       recorderStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -654,7 +787,7 @@
       audioSource.connect(analyser);
       listeningEnabled = true;
       speechFrameCount = 0;
-      noiseFloor = 0.012;
+      noiseFloor = isAppleMobile ? 0.006 : 0.01;
       updateListeningUi();
       monitorVoiceActivity();
       track("always_listening_enabled", {});
@@ -675,11 +808,11 @@
     for (const sample of vadBuffer) energy += sample * sample;
     const rms = Math.sqrt(energy / vadBuffer.length);
     const now = performance.now();
-    const threshold = Math.max(0.026, noiseFloor * 2.8);
+    const threshold = Math.max(isAppleMobile ? 0.011 : 0.018, noiseFloor * 2.25);
     const canHearUser = appeared && !pending && !closing && !assistantSpeaking && now >= listenResumeAt;
 
     if (!recorder && canHearUser) {
-      noiseFloor = Math.min(0.04, noiseFloor * 0.96 + rms * 0.04);
+      if (rms < threshold) noiseFloor = Math.min(0.035, Math.max(0.003, noiseFloor * 0.97 + rms * 0.03));
       speechFrameCount = rms > threshold ? speechFrameCount + 1 : Math.max(0, speechFrameCount - 1);
       if (speechFrameCount >= 3) startVoiceCapture(now);
     } else if (recorder?.state === "recording") {
@@ -717,7 +850,8 @@
         updateListeningUi();
         if (!shouldDiscard) transcribeRecording(chunks, recordingType);
       }, { once: true });
-      activeRecorder.start(250);
+      if (isAppleMobile) activeRecorder.start();
+      else activeRecorder.start(250);
       elements.micButton.classList.add("is-recording");
       updateListeningUi();
       track("voice_recording_started", {});
@@ -834,7 +968,7 @@
     clearSessionTimers();
     stopAlwaysListening();
     window.clearTimeout(speechFallbackTimer);
-    window.speechSynthesis?.cancel();
+    stopSpeechPlayback();
     fallbackStream?.getTracks().forEach((track) => track.stop());
     fallbackStream = null;
     try {
