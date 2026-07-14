@@ -65,7 +65,7 @@
         height: 100%;
         margin: 0;
         overflow: hidden;
-        background: #0798c2;
+        background: #000;
       }
 
       button,
@@ -177,6 +177,18 @@
       a-scene {
         position: fixed;
         inset: 0;
+        z-index: 1;
+        background: transparent !important;
+      }
+
+      body > video {
+        position: fixed !important;
+        z-index: 0 !important;
+        object-fit: cover;
+      }
+
+      .a-canvas {
+        background: transparent !important;
       }
     </style>
   </head>
@@ -186,7 +198,7 @@
       <div class="card">
         <img class="logo" src="./marker.png" alt="Маркер Soft Mind" />
         <h1 id="title">AR-персонаж</h1>
-        <p class="lead">Разрешите доступ к камере, затем наведите iPhone на этот маркер на другом экране или на бумаге.</p>
+        <p class="lead">Положите маркер горизонтально на стол, разрешите доступ к камере и наведите на него iPhone под углом.</p>
         <button id="start-button" type="button" disabled>Подготовка…</button>
         <a class="marker-link" href="./marker.png" target="_blank" rel="noopener">Открыть маркер отдельно</a>
       </div>
@@ -199,7 +211,7 @@
     <a-scene
       mindar-image="imageTargetSrc: ./card.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no; filterMinCF: 0.001; filterBeta: 10"
       color-space="sRGB"
-      renderer="colorManagement: true; physicallyCorrectLights: true; antialias: true; precision: medium"
+      renderer="alpha: true; colorManagement: true; physicallyCorrectLights: true; antialias: true; precision: medium"
       vr-mode-ui="enabled: false"
       device-orientation-permission-ui="enabled: false"
       loading-screen="enabled: false"
@@ -215,17 +227,22 @@
 
       <a-entity id="target" mindar-image-target="targetIndex: 0">
         <a-entity
-          position="0 0.025 0.12"
-          animation__float="property: position; from: 0 0.025 0.12; to: 0 0.075 0.12; dur: 1600; easing: easeInOutSine; loop: true; dir: alternate"
-          animation__turn="property: rotation; from: 0 -7 0; to: 0 7 0; dur: 3200; easing: easeInOutSine; loop: true; dir: alternate"
+          position="0 0 0.015"
+          animation__float="property: position; from: 0 0 0.015; to: 0 0 0.045; dur: 1600; easing: easeInOutSine; loop: true; dir: alternate"
         >
-          <a-gltf-model
-            id="character-model"
-            src="#character"
-            position="0 -0.42 0"
-            scale="0.4 0.4 0.4"
-            character-idle
-          ></a-gltf-model>
+          <a-entity rotation="90 0 0">
+            <a-entity
+              animation__turn="property: rotation; from: 0 -7 0; to: 0 7 0; dur: 3200; easing: easeInOutSine; loop: true; dir: alternate"
+            >
+              <a-gltf-model
+                id="character-model"
+                src="#character"
+                position="0 0 0"
+                scale="0.4 0.4 0.4"
+                character-idle
+              ></a-gltf-model>
+            </a-entity>
+          </a-entity>
         </a-entity>
       </a-entity>
     </a-scene>
@@ -253,7 +270,7 @@
       });
 
       scene.addEventListener("arReady", () => {
-        setStatus("Наведите камеру на маркер Soft Mind");
+        setStatus("Положите маркер на стол и наведите на него камеру под углом");
       });
 
       scene.addEventListener("arError", () => {
