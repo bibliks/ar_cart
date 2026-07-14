@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: bibliks-sberkot-ar-api
+    runtime: node
+    plan: free
+    rootDir: prototype
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://bibliks.github.io
+      - key: ALLOW_RUNTIME_API_KEY
+        value: "false"

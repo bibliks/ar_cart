@@ -16,10 +16,22 @@ const publicRoot = path.join(prototypeRoot, "public");
 await loadEnv(path.join(prototypeRoot, ".env"));
 
 const port = readInteger(process.env.PORT, 4175, 1, 65535);
+const host = process.env.HOST?.trim() || (process.env.RENDER ? "0.0.0.0" : "127.0.0.1");
 let openAIKey = process.env.OPENAI_API_KEY?.trim() || "";
 const dialogueModel = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
 const transcribeModel = process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "gpt-4o-mini-transcribe";
 const openAITimeoutMs = readInteger(process.env.OPENAI_TIMEOUT_MS, 12000, 1000, 30000);
+const allowRuntimeApiKey = process.env.ALLOW_RUNTIME_API_KEY !== "false" && !process.env.RENDER;
+const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "https://bibliks.github.io")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([
+  `http://127.0.0.1:${port}`,
+  `http://localhost:${port}`,
+  ...configuredOrigins,
+]);
+const rateBuckets = new Map();
 
 const mimeTypes = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -35,26 +47,37 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || "/", "http://localhost");
 
   try {
+    if (url.pathname.startsWith("/api/")) {
+      if (!hasAllowedOrigin(request)) return sendJson(response, 403, { error: "origin_not_allowed" });
+      setCorsHeaders(request, response);
+      if (request.method === "OPTIONS") {
+        response.writeHead(204, { "Cache-Control": "no-store" });
+        return response.end();
+      }
+      if (request.method === "POST" && !consumeRateLimit(request, url.pathname)) {
+        return sendJson(response, 429, { error: "rate_limit_exceeded" });
+      }
+    }
+
     if (request.method === "GET" && url.pathname === "/api/health") {
       return sendJson(response, 200, {
         ok: true,
         openaiConfigured: Boolean(openAIKey),
+        runtimeKeyConfiguration: allowRuntimeApiKey,
         model: dialogueModel,
       });
     }
 
     if (request.method === "POST" && url.pathname === "/api/configure") {
-      if (!hasAllowedOrigin(request)) return sendJson(response, 403, { error: "origin_not_allowed" });
+      if (!allowRuntimeApiKey) return sendJson(response, 404, { error: "runtime_configuration_disabled" });
       return await handleConfiguration(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/dialogue") {
-      if (!hasAllowedOrigin(request)) return sendJson(response, 403, { error: "origin_not_allowed" });
       return await handleDialogue(request, response);
     }
 
     if (request.method === "POST" && url.pathname === "/api/transcribe") {
-      if (!hasAllowedOrigin(request)) return sendJson(response, 403, { error: "origin_not_allowed" });
       return await handleTranscription(request, response);
     }
 
@@ -69,8 +92,8 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`SberKot prototype: http://127.0.0.1:${port}`);
+server.listen(port, host, () => {
+  console.log(`SberKot prototype: http://${host}:${port}`);
   console.log(`OpenAI: ${openAIKey ? "configured" : "local scripted fallback"}`);
 });
 
@@ -378,7 +401,40 @@ function sendJson(response, status, value) {
 function hasAllowedOrigin(request) {
   const origin = request.headers.origin;
   if (!origin) return true;
-  return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+  return allowedOrigins.has(origin);
+}
+
+function setCorsHeaders(request, response) {
+  const origin = request.headers.origin;
+  if (!origin || !allowedOrigins.has(origin)) return;
+  response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader("Vary", "Origin");
+}
+
+function consumeRateLimit(request, pathname) {
+  const limits = {
+    "/api/configure": 5,
+    "/api/dialogue": 40,
+    "/api/transcribe": 20,
+  };
+  const limit = limits[pathname] || 20;
+  const clientAddress = String(
+    request.headers["cf-connecting-ip"] ||
+    request.headers["x-forwarded-for"] ||
+    request.socket.remoteAddress ||
+    "unknown",
+  ).split(",")[0].trim();
+  const key = `${clientAddress}:${pathname}`;
+  const now = Date.now();
+  const current = rateBuckets.get(key);
+  if (!current || now - current.startedAt >= 10 * 60 * 1000) {
+    rateBuckets.set(key, { count: 1, startedAt: now });
+    return true;
+  }
+  current.count += 1;
+  return current.count <= limit;
 }
 
 function readInteger(value, fallback, min, max) {

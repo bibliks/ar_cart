@@ -15,11 +15,15 @@ await Promise.all([
   mkdir(assetsRoot, { recursive: true }),
 ]);
 
-const indexHtml = await readFile(path.join(publicRoot, "index.html"));
+const pagesApiBase = process.env.PAGES_API_BASE || "https://bibliks-sberkot-ar-api.onrender.com";
+const indexHtml = (await readFile(path.join(publicRoot, "index.html"), "utf8")).replace(
+  '<meta name="sberkot-api-base" content="" />',
+  `<meta name="sberkot-api-base" content="${pagesApiBase}" />`,
+);
 await Promise.all([
-  writeFile(path.join(pagesRoot, "index.html"), indexHtml),
-  writeFile(path.join(pagesRoot, "with-app", "index.html"), indexHtml),
-  writeFile(path.join(pagesRoot, "without-app", "index.html"), indexHtml),
+  writeFile(path.join(pagesRoot, "index.html"), indexHtml, "utf8"),
+  writeFile(path.join(pagesRoot, "with-app", "index.html"), indexHtml, "utf8"),
+  writeFile(path.join(pagesRoot, "without-app", "index.html"), indexHtml, "utf8"),
   writeFile(path.join(pagesRoot, ".nojekyll"), ""),
   copyFile(path.join(publicRoot, "app.css"), path.join(pagesRoot, "app.css")),
   copyFile(path.join(publicRoot, "app.js"), path.join(pagesRoot, "app.js")),

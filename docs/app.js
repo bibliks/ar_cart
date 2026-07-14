@@ -3,6 +3,8 @@
 
   const pathParts = window.location.pathname.split("/").filter(Boolean);
   const routeName = pathParts.at(-1) || "";
+  const apiBase = document.querySelector('meta[name="sberkot-api-base"]')?.content.trim().replace(/\/$/, "") || "";
+  const usesRemoteBackend = Boolean(apiBase);
   const isWithoutApp = routeName === "without-app";
   const isWithApp = routeName === "with-app";
   const isExperience = isWithoutApp || isWithApp;
@@ -12,7 +14,9 @@
   if (!isExperience) {
     launcher.hidden = false;
     const healthElement = document.querySelector("#api-health");
-    setupCredentialForm(document.querySelector("#launcher-api-setup"), () => refreshHealth(healthElement));
+    const launcherApiSetup = document.querySelector("#launcher-api-setup");
+    launcherApiSetup.hidden = usesRemoteBackend;
+    setupCredentialForm(launcherApiSetup, () => refreshHealth(healthElement));
     refreshHealth(healthElement);
     return;
   }
@@ -122,7 +126,13 @@
     await checkHealth();
     elements.apiSetup.open = false;
   });
+  elements.apiSetup.hidden = usesRemoteBackend;
   checkHealth();
+
+  function apiUrl(pathname) {
+    if (apiBase) return `${apiBase}/api/${pathname}`;
+    return new URL(`api/${pathname}`, document.baseURI).href;
+  }
 
   function setupModeCopy() {
     if (backendTimeout) {
@@ -192,7 +202,7 @@
   async function checkHealth() {
     let serverAvailable = true;
     try {
-      const response = await fetch("api/health", { cache: "no-store" });
+      const response = await fetch(apiUrl("health"), { cache: "no-store" });
       if (!response.ok) throw new Error("health_unavailable");
       const health = await response.json();
       openAIConfigured = Boolean(health.openaiConfigured);
@@ -201,7 +211,7 @@
       serverAvailable = false;
     }
 
-    elements.apiSetup.hidden = !serverAvailable;
+    elements.apiSetup.hidden = usesRemoteBackend || !serverAvailable;
 
     if (!openAIConfigured) {
       updateListeningUi();
@@ -360,7 +370,7 @@
     const historyBeforeTurn = history.slice(-24);
 
     try {
-      const response = await fetch("api/dialogue", {
+      const response = await fetch(apiUrl("dialogue"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -735,7 +745,7 @@
     setControlsDisabled(true);
     elements.subtitle.textContent = "Распознаём короткую реплику…";
     try {
-      const response = await fetch("api/transcribe", {
+      const response = await fetch(apiUrl("transcribe"), {
         method: "POST",
         headers: { "Content-Type": mimeType },
         body: audio,
@@ -1012,12 +1022,18 @@
 
   async function refreshHealth(element) {
     try {
-      const response = await fetch("api/health", { cache: "no-store" });
+      const response = await fetch(apiUrl("health"), { cache: "no-store" });
       if (!response.ok) throw new Error("health_unavailable");
       const health = await response.json();
       element.textContent = health.openaiConfigured
         ? `OpenAI подключён · ${health.model}`
-        : "OpenAI не подключён · работает локальный сценарий";
+        : usesRemoteBackend
+          ? "Backend подключён · ожидается секрет OpenAI"
+          : "OpenAI не подключён · работает локальный сценарий";
+      element.closest(".launcher__content")?.querySelector("[data-api-setup]")?.toggleAttribute(
+        "hidden",
+        usesRemoteBackend || !health.runtimeKeyConfiguration,
+      );
     } catch {
       element.textContent = "Статическая версия · работает локальный сценарий";
       element.closest(".launcher__content")?.querySelector("[data-api-setup]")?.setAttribute("hidden", "");
@@ -1042,7 +1058,7 @@
       status.textContent = "Проверяем ключ через OpenAI…";
 
       try {
-        const response = await fetch("api/configure", {
+        const response = await fetch(apiUrl("configure"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ apiKey }),
