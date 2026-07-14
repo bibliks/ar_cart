@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0798c2" />
+    <title>Soft Mind AR</title>
+    <link rel="icon" href="./marker.png" />
+
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <script>
+      AFRAME.registerComponent("character-idle", {
+        init() {
+          this.bones = {};
+          this.rest = {};
+
+          this.el.addEventListener("model-loaded", () => {
+            const model = this.el.getObject3D("mesh");
+            ["Head", "Spine1", "LeftArm", "LeftForeArm"].forEach((name) => {
+              const bone = model && model.getObjectByName(name);
+              if (bone) {
+                this.bones[name] = bone;
+                this.rest[name] = bone.rotation.clone();
+              }
+            });
+          });
+        },
+
+        tick(time) {
+          if (!this.rest.Head) return;
+
+          const seconds = time / 1000;
+          const setRotation = (name, x, y, z) => {
+            const bone = this.bones[name];
+            const rest = this.rest[name];
+            if (bone && rest) bone.rotation.set(rest.x + x, rest.y + y, rest.z + z);
+          };
+
+          setRotation("Head", 0.03 * Math.sin(seconds * 1.6), 0.08 * Math.sin(seconds * 0.8), 0);
+          setRotation("Spine1", 0.025 * Math.sin(seconds * 1.8), 0, 0.025 * Math.sin(seconds * 0.9));
+          setRotation("LeftArm", 0, 0, 0.13 + 0.08 * Math.sin(seconds * 2.2));
+          setRotation("LeftForeArm", 0.1 * Math.sin(seconds * 2.2), 0, 0.12 * Math.sin(seconds * 2.2));
+        },
+      });
+    </script>
+
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #0798c2;
+      }
+
+      button,
+      a {
+        font: inherit;
+      }
+
+      #intro {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+        background:
+          radial-gradient(circle at 50% 20%, rgba(255, 236, 49, 0.22), transparent 36%),
+          linear-gradient(160deg, #0ba4ce 0%, #057ca8 100%);
+        transition: opacity 220ms ease, visibility 220ms ease;
+      }
+
+      #intro[hidden] {
+        display: none;
+      }
+
+      .card {
+        width: min(100%, 420px);
+        padding: 28px 24px 24px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 28px;
+        background: rgba(0, 35, 52, 0.82);
+        box-shadow: 0 24px 70px rgba(0, 28, 44, 0.32);
+        text-align: center;
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+
+      .logo {
+        width: min(100%, 270px);
+        height: auto;
+        border-radius: 14px;
+      }
+
+      h1 {
+        margin: 22px 0 10px;
+        font-size: clamp(25px, 7vw, 34px);
+        line-height: 1.05;
+      }
+
+      .lead {
+        margin: 0 auto 22px;
+        color: rgba(255, 255, 255, 0.76);
+        font-size: 16px;
+        line-height: 1.45;
+      }
+
+      #start-button {
+        width: 100%;
+        min-height: 54px;
+        border: 0;
+        border-radius: 17px;
+        background: #ffeb31;
+        color: #071c27;
+        font-weight: 800;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      #start-button:disabled {
+        cursor: wait;
+        opacity: 0.58;
+      }
+
+      .marker-link {
+        display: inline-block;
+        margin-top: 16px;
+        color: #fff;
+        font-size: 14px;
+        text-underline-offset: 4px;
+      }
+
+      #hud {
+        position: fixed;
+        left: 50%;
+        bottom: max(18px, env(safe-area-inset-bottom));
+        z-index: 10;
+        width: min(calc(100% - 32px), 430px);
+        transform: translateX(-50%);
+        padding: 12px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 18px;
+        background: rgba(0, 23, 34, 0.72);
+        color: #fff;
+        text-align: center;
+        font-size: 14px;
+        line-height: 1.35;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        pointer-events: none;
+      }
+
+      #hud[hidden] {
+        display: none;
+      }
+
+      #status {
+        margin: 0;
+      }
+
+      a-scene {
+        position: fixed;
+        inset: 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <section id="intro" aria-labelledby="title">
+      <div class="card">
+        <img class="logo" src="./marker.png" alt="Маркер Soft Mind" />
+        <h1 id="title">AR-персонаж</h1>
+        <p class="lead">Разрешите доступ к камере, затем наведите iPhone на этот маркер на другом экране или на бумаге.</p>
+        <button id="start-button" type="button" disabled>Подготовка…</button>
+        <a class="marker-link" href="./marker.png" target="_blank" rel="noopener">Открыть маркер отдельно</a>
+      </div>
+    </section>
+
+    <aside id="hud" hidden aria-live="polite">
+      <p id="status">Запускаем камеру…</p>
+    </aside>
+
+    <a-scene
+      mindar-image="imageTargetSrc: ./card.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no; filterMinCF: 0.001; filterBeta: 10"
+      color-space="sRGB"
+      renderer="colorManagement: true; physicallyCorrectLights: true; antialias: true; precision: medium"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: false"
+      loading-screen="enabled: false"
+      embedded
+    >
+      <a-assets timeout="20000">
+        <a-asset-item id="character" src="./character.glb"></a-asset-item>
+      </a-assets>
+
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-entity light="type: ambient; intensity: 1.35"></a-entity>
+      <a-entity light="type: directional; intensity: 1.6" position="1 2 1"></a-entity>
+
+      <a-entity id="target" mindar-image-target="targetIndex: 0">
+        <a-entity
+          position="0 0.025 0.12"
+          animation__float="property: position; from: 0 0.025 0.12; to: 0 0.075 0.12; dur: 1600; easing: easeInOutSine; loop: true; dir: alternate"
+          animation__turn="property: rotation; from: 0 -7 0; to: 0 7 0; dur: 3200; easing: easeInOutSine; loop: true; dir: alternate"
+        >
+          <a-gltf-model
+            id="character-model"
+            src="#character"
+            position="0 -0.42 0"
+            scale="0.4 0.4 0.4"
+            character-idle
+          ></a-gltf-model>
+        </a-entity>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      const scene = document.querySelector("a-scene");
+      const intro = document.querySelector("#intro");
+      const hud = document.querySelector("#hud");
+      const status = document.querySelector("#status");
+      const startButton = document.querySelector("#start-button");
+      const target = document.querySelector("#target");
+      const character = document.querySelector("#character-model");
+
+      const setStatus = (message) => {
+        status.textContent = message;
+      };
+
+      scene.addEventListener("loaded", () => {
+        startButton.disabled = false;
+        startButton.textContent = "Запустить AR";
+      });
+
+      character.addEventListener("model-error", () => {
+        setStatus("Не удалось загрузить персонажа. Обновите страницу и попробуйте снова.");
+      });
+
+      scene.addEventListener("arReady", () => {
+        setStatus("Наведите камеру на маркер Soft Mind");
+      });
+
+      scene.addEventListener("arError", () => {
+        setStatus("Нет доступа к камере. Разрешите камеру для Safari в настройках iPhone и обновите страницу.");
+      });
+
+      target.addEventListener("targetFound", () => {
+        setStatus("Маркер найден — персонаж ожил!");
+      });
+
+      target.addEventListener("targetLost", () => {
+        setStatus("Маркер потерян. Наведите камеру на него снова.");
+      });
+
+      startButton.addEventListener("click", async () => {
+        startButton.disabled = true;
+        intro.hidden = true;
+        hud.hidden = false;
+        setStatus("Разрешите Safari доступ к камере…");
+
+        try {
+          await scene.systems["mindar-image-system"].start();
+        } catch (error) {
+          console.error(error);
+          setStatus("Камера не запустилась. Разрешите доступ к камере и обновите страницу.");
+        }
+      });
+    </script>
+  </body>
+</html>
