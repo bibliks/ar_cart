@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#071d28" />
+    <meta name="sberkot-api-base" content="" />
+    <title>WebAR-СберКот — MindAR-прототип</title>
+    <base id="app-base" href="/" />
+    <script>
+      (() => {
+        const parts = window.location.pathname.split("/").filter(Boolean);
+        const modeIndex = parts.findIndex((part) => part === "with-app" || part === "without-app");
+        const baseParts = modeIndex >= 0 ? parts.slice(0, modeIndex) : parts;
+        document.querySelector("#app-base").href = `/${baseParts.join("/")}${baseParts.length ? "/" : ""}`;
+      })();
+    </script>
+    <link rel="icon" href="assets/marker.png" />
+    <link rel="stylesheet" href="app.css" />
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <script src="app.js" defer></script>
+  </head>
+
+  <body>
+    <main id="launcher" class="launcher" hidden>
+      <div class="launcher__content">
+        <p class="eyebrow">MindAR · WebAR · прототип</p>
+        <h1>Выберите тестовый контур</h1>
+        <p class="launcher__lead">
+          Обе версии используют один маркер и один безопасный диалоговый сценарий. Отличается только мок-профиль и финальная CTA.
+        </p>
+
+        <div class="version-grid">
+          <a class="version-card version-card--yellow" href="without-app/">
+            <span class="version-card__number">01</span>
+            <strong>Без приложения</strong>
+            <span>Первое знакомство → мягкое продолжение в приложении</span>
+          </a>
+          <a class="version-card version-card--cyan" href="with-app/">
+            <span class="version-card__number">02</span>
+            <strong>С приложением</strong>
+            <span>Ежедневная миссия → логичный следующий шаг в приложении</span>
+          </a>
+        </div>
+
+        <div class="launcher__tools">
+          <a href="assets/marker.png" target="_blank" rel="noopener">Открыть маркер</a>
+          <span id="api-health">Проверяем сервер…</span>
+        </div>
+
+        <section id="launcher-api-setup" class="api-setup" data-api-setup aria-labelledby="launcher-api-title">
+          <div>
+            <p class="eyebrow">Голосовой диалог</p>
+            <h2 id="launcher-api-title">Подключить OpenAI на время запуска</h2>
+            <p>Вставьте новый ключ после отзыва опубликованного. Он останется только в памяти локального Node-процесса.</p>
+          </div>
+          <form class="api-setup__form" data-api-form>
+            <label for="launcher-api-key">Новый API-ключ</label>
+            <div class="api-setup__controls">
+              <input
+                id="launcher-api-key"
+                data-api-key
+                type="password"
+                inputmode="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="sk-…"
+                required
+              />
+              <button data-api-submit type="submit">Подключить</button>
+            </div>
+            <p class="api-setup__status" data-api-status aria-live="polite">Ключ не сохраняется в браузере или проекте.</p>
+          </form>
+        </section>
+
+        <p class="disclosure">
+          Это тестовая AR-сцена. Ответы и голос создаёт ИИ; не сообщайте имя, телефон, номер карты или другие личные данные.
+        </p>
+      </div>
+    </main>
+
+    <main id="experience" class="experience" hidden>
+      <div id="fallback-layer" class="fallback-layer" aria-hidden="true">
+        <video id="fallback-camera" autoplay muted playsinline></video>
+        <div class="fallback-cat" aria-label="Двухмерный СберКот">
+          <i class="fallback-cat__ear fallback-cat__ear--left"></i>
+          <i class="fallback-cat__ear fallback-cat__ear--right"></i>
+          <div class="fallback-cat__head">
+            <i class="fallback-cat__eye fallback-cat__eye--left"></i>
+            <i class="fallback-cat__eye fallback-cat__eye--right"></i>
+            <i class="fallback-cat__nose"></i>
+          </div>
+          <div class="fallback-cat__body"></div>
+          <span>2D-режим</span>
+        </div>
+      </div>
+
+      <section id="intro" class="intro" aria-labelledby="intro-title">
+        <div class="intro__panel">
+          <div class="intro__logo-wrap">
+            <img src="assets/marker.png" alt="Тестовый AR-маркер" />
+          </div>
+          <p id="mode-kicker" class="eyebrow">Версия прототипа</p>
+          <h1 id="intro-title">Встреча со СберКотом</h1>
+          <p class="intro__lead">
+            Положите маркер горизонтально, разрешите камеру и наведите на него устройство под небольшим углом.
+          </p>
+          <button id="start-button" class="primary-button" type="button" disabled>Подготовка сцены…</button>
+          <div class="intro__links">
+            <a href="./">Сменить версию</a>
+            <a href="assets/marker.png" target="_blank" rel="noopener">Открыть маркер</a>
+          </div>
+          <details id="experience-api-setup" class="api-setup api-setup--compact" data-api-setup>
+            <summary>Подключить голосовой диалог</summary>
+            <form class="api-setup__form" data-api-form>
+              <label for="experience-api-key">Новый API-ключ</label>
+              <div class="api-setup__controls">
+                <input
+                  id="experience-api-key"
+                  data-api-key
+                  type="password"
+                  inputmode="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="sk-…"
+                  required
+                />
+                <button data-api-submit type="submit">Подключить</button>
+              </div>
+              <p class="api-setup__status" data-api-status aria-live="polite">Только в памяти локального сервера до перезапуска.</p>
+            </form>
+          </details>
+          <p class="disclosure">
+            Ответы и голос создаёт ИИ. Не сообщайте имя, телефон, номер карты и другие личные данные.
+          </p>
+        </div>
+      </section>
+
+      <header id="topbar" class="topbar" hidden>
+        <div class="topbar__row">
+          <span id="mode-badge" class="mode-badge"></span>
+          <span id="timer" class="timer">00:00</span>
+          <button id="reset-test" class="text-button" type="button">Сбросить тест</button>
+        </div>
+        <div class="progress" aria-hidden="true"><i id="progress-value"></i></div>
+        <p id="state-label">Наведите камеру на маркер</p>
+      </header>
+
+      <aside id="scan-hint" class="scan-hint" hidden aria-live="polite">
+        <span class="scan-hint__corners"></span>
+        <p id="scan-status">Ищем маркер…</p>
+      </aside>
+
+      <section id="dialogue" class="dialogue" hidden aria-live="polite">
+        <div class="dialogue__meta">
+          <span class="speaker-dot"></span>
+          <strong>СберКот</strong>
+          <span id="reply-source" class="reply-source">локальный сценарий</span>
+        </div>
+        <p id="subtitle" class="subtitle">Секунду, я появляюсь…</p>
+        <div id="chips" class="chips"></div>
+        <button id="mic-button" class="mic-button" type="button" aria-label="Включить постоянное прослушивание" aria-pressed="false">
+          <span aria-hidden="true">●</span>
+          <span id="mic-label">Микрофон включится после запуска</span>
+        </button>
+        <p id="mic-note" class="mic-note">После запуска можно говорить без удержания кнопки</p>
+      </section>
+
+      <section id="postcard" class="postcard" hidden aria-labelledby="postcard-title">
+        <div class="postcard__card">
+          <span class="postcard__spark">✦</span>
+          <p class="eyebrow">Котомиссия продолжается</p>
+          <h2 id="postcard-title">Следующий шаг уже рядом</h2>
+          <p id="postcard-copy">СберКот машет лапой и оставляет тебе открытку.</p>
+          <button id="cta-button" class="primary-button" type="button">Продолжить</button>
+          <button id="restart-button" class="secondary-button" type="button">Пройти ещё раз</button>
+          <a class="postcard__back" href="./">К выбору версии</a>
+          <p id="cta-note" class="cta-note" hidden>Демо: продуктовая ссылка будет подключена после согласования.</p>
+        </div>
+      </section>
+
+      <a-scene
+        id="ar-scene"
+        mindar-image="imageTargetSrc: assets/card.mind; autoStart: false; uiLoading: no; uiScanning: no; uiError: no; filterMinCF: 0.001; filterBeta: 10"
+        color-space="sRGB"
+        renderer="alpha: true; colorManagement: true; physicallyCorrectLights: true; antialias: true; precision: medium"
+        vr-mode-ui="enabled: false"
+        device-orientation-permission-ui="enabled: false"
+        loading-screen="enabled: false"
+        embedded
+      >
+        <a-assets timeout="20000">
+          <a-asset-item id="character-asset" src="assets/character.glb"></a-asset-item>
+        </a-assets>
+
+        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+        <a-entity light="type: ambient; intensity: 1.55"></a-entity>
+
+        <a-entity id="ar-target" mindar-image-target="targetIndex: 0">
+          <a-entity position="0 0 0.025" rotation="90 0 0">
+            <a-gltf-model
+              id="character-model"
+              src="#character-asset"
+              position="0 0 0"
+              rotation="0 0 0"
+              scale="0.4 0.4 0.4"
+              sberkot-character="action: idle"
+            ></a-gltf-model>
+          </a-entity>
+        </a-entity>
+      </a-scene>
+    </main>
+  </body>
+</html>
